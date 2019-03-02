@@ -5,7 +5,7 @@ Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-    http://www.apache.org/licenses/LICENSE-2.0
+		http://www.apache.org/licenses/LICENSE-2.0
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -26,7 +26,7 @@ import (
 	"k8s.io/klog"
 
 	apps "k8s.io/api/apps/v1"
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -56,7 +56,6 @@ import (
 	"k8s.io/kubernetes/pkg/scheduler/algorithm/predicates"
 	schedulernodeinfo "k8s.io/kubernetes/pkg/scheduler/nodeinfo"
 	"k8s.io/kubernetes/pkg/util/metrics"
-	"k8s.io/utils/integer"
 )
 
 const (
@@ -1008,7 +1007,6 @@ func (dsc *DaemonSetsController) syncNodes(ds *apps.DaemonSet, podsToDelete, nod
 	errCh := make(chan error, createDiff+deleteDiff)
 
 	klog.V(4).Infof("Nodes needing daemon pods for daemon set %s: %+v, creating %d", ds.Name, nodesNeedingDaemonPods, createDiff)
-	createWait := sync.WaitGroup{}
 	// If the returned error is not nil we have a parse error.
 	// The controller handles this via the hash.
 	generation, err := util.GetTemplateGeneration(ds)
@@ -1024,63 +1022,52 @@ func (dsc *DaemonSetsController) syncNodes(ds *apps.DaemonSet, podsToDelete, nod
 	// prevented from spamming the API service with the pod create requests
 	// after one of its pods fails.  Conveniently, this also prevents the
 	// event spam that those failures would generate.
-	batchSize := integer.IntMin(createDiff, controller.SlowStartInitialBatchSize)
-	for pos := 0; createDiff > pos; batchSize, pos = integer.IntMin(2*batchSize, createDiff-(pos+batchSize)), pos+batchSize {
-		errorCount := len(errCh)
-		createWait.Add(batchSize)
-		for i := pos; i < pos+batchSize; i++ {
-			go func(ix int) {
-				defer createWait.Done()
-				var err error
+	skippedPods, err := controller.SlowStartBatchCreate(int32(createDiff), errCh, func(ix int32) {
+		var err error
 
-				podTemplate := template.DeepCopy()
-				if utilfeature.DefaultFeatureGate.Enabled(features.ScheduleDaemonSetPods) {
-					// The pod's NodeAffinity will be updated to make sure the Pod is bound
-					// to the target node by default scheduler. It is safe to do so because there
-					// should be no conflicting node affinity with the target node.
-					podTemplate.Spec.Affinity = util.ReplaceDaemonSetPodNodeNameNodeAffinity(
-						podTemplate.Spec.Affinity, nodesNeedingDaemonPods[ix])
+		podTemplate := template.DeepCopy()
+		if utilfeature.DefaultFeatureGate.Enabled(features.ScheduleDaemonSetPods) {
+			// The pod's NodeAffinity will be updated to make sure the Pod is bound
+			// to the target node by default scheduler. It is safe to do so because there
+			// should be no conflicting node affinity with the target node.
+			podTemplate.Spec.Affinity = util.ReplaceDaemonSetPodNodeNameNodeAffinity(
+				podTemplate.Spec.Affinity, nodesNeedingDaemonPods[ix])
 
-					err = dsc.podControl.CreatePodsWithControllerRef(ds.Namespace, podTemplate,
-						ds, metav1.NewControllerRef(ds, controllerKind))
-				} else {
-					// If pod is scheduled by DaemonSetController, set its '.spec.scheduleName'.
-					podTemplate.Spec.SchedulerName = "kubernetes.io/daemonset-controller"
+			err = dsc.podControl.CreatePodsWithControllerRef(ds.Namespace, podTemplate,
+				ds, metav1.NewControllerRef(ds, controllerKind))
+		} else {
+			// If pod is scheduled by DaemonSetController, set its '.spec.scheduleName'.
+			podTemplate.Spec.SchedulerName = "kubernetes.io/daemonset-controller"
 
-					err = dsc.podControl.CreatePodsOnNode(nodesNeedingDaemonPods[ix], ds.Namespace, podTemplate,
-						ds, metav1.NewControllerRef(ds, controllerKind))
-				}
-
-				if err != nil && errors.IsTimeout(err) {
-					// Pod is created but its initialization has timed out.
-					// If the initialization is successful eventually, the
-					// controller will observe the creation via the informer.
-					// If the initialization fails, or if the pod keeps
-					// uninitialized for a long time, the informer will not
-					// receive any update, and the controller will create a new
-					// pod when the expectation expires.
-					return
-				}
-				if err != nil {
-					klog.V(2).Infof("Failed creation, decrementing expectations for set %q/%q", ds.Namespace, ds.Name)
-					dsc.expectations.CreationObserved(dsKey)
-					errCh <- err
-					utilruntime.HandleError(err)
-				}
-			}(i)
+			err = dsc.podControl.CreatePodsOnNode(nodesNeedingDaemonPods[ix], ds.Namespace, podTemplate,
+				ds, metav1.NewControllerRef(ds, controllerKind))
 		}
-		createWait.Wait()
-		// any skipped pods that we never attempted to start shouldn't be expected.
-		skippedPods := createDiff - batchSize
-		if errorCount < len(errCh) && skippedPods > 0 {
-			klog.V(2).Infof("Slow-start failure. Skipping creation of %d pods, decrementing expectations for set %q/%q", skippedPods, ds.Namespace, ds.Name)
-			for i := 0; i < skippedPods; i++ {
-				dsc.expectations.CreationObserved(dsKey)
-			}
-			// The skipped pods will be retried later. The next controller resync will
-			// retry the slow start process.
-			break
+
+		if err != nil && errors.IsTimeout(err) {
+			// Pod is created but its initialization has timed out.
+			// If the initialization is successful eventually, the
+			// controller will observe the creation via the informer.
+			// If the initialization fails, or if the pod keeps
+			// uninitialized for a long time, the informer will not
+			// receive any update, and the controller will create a new
+			// pod when the expectation expires.
+			return
 		}
+		if err != nil {
+			klog.V(2).Infof("Failed creation, decrementing expectations for set %q/%q", ds.Namespace, ds.Name)
+			dsc.expectations.CreationObserved(dsKey)
+			errCh <- err
+			utilruntime.HandleError(err)
+		}
+	})
+
+	if err != nil {
+		klog.V(2).Infof("Slow-start failure. Skipping creation of %d pods, decrementing expectations for set %q/%q", skippedPods, ds.Namespace, ds.Name)
+		for i := int32(0); i < skippedPods; i++ {
+			dsc.expectations.CreationObserved(dsKey)
+		}
+		// The skipped pods will be retried later. The next controller resync will
+		// retry the slow start process.
 	}
 
 	klog.V(4).Infof("Pods to delete for daemon set %s: %+v, deleting %d", ds.Name, podsToDelete, deleteDiff)

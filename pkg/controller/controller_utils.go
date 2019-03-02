@@ -26,7 +26,7 @@ import (
 	"time"
 
 	apps "k8s.io/api/apps/v1"
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -840,6 +840,28 @@ func FilterReplicaSets(RSes []*apps.ReplicaSet, filterFn filterRS) []*apps.Repli
 // except there's not possibility for error since we know the exact type.
 func PodKey(pod *v1.Pod) string {
 	return fmt.Sprintf("%v/%v", pod.Namespace, pod.Name)
+}
+
+// SlowStartBatchCreate
+func SlowStartBatchCreate(totalCount int32, errCh chan error, batchCreateFn func(ix int32)) (int32, error) {
+	waitGroup := sync.WaitGroup{}
+	batchSize := integer.Int32Min(totalCount, SlowStartInitialBatchSize)
+	for pos := int32(0); totalCount > pos; batchSize, pos = integer.Int32Min(2*batchSize, totalCount-(pos+batchSize)), pos+batchSize {
+		errorCount := len(errCh)
+		waitGroup.Add(int(batchSize))
+		for i := int32(pos); i < pos+batchSize; i++ {
+			go func(ix int32) {
+				defer waitGroup.Done()
+				batchCreateFn(ix)
+			}(i)
+		}
+		waitGroup.Wait()
+		skippedPods := totalCount - batchSize
+		if errorCount < len(errCh) && skippedPods > 0 {
+			return skippedPods, fmt.Errorf("Slow-start failure")
+		}
+	}
+	return 0, nil
 }
 
 // ControllersByCreationTimestamp sorts a list of ReplicationControllers by creation timestamp, using their names as a tie breaker.
