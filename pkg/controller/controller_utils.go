@@ -856,7 +856,7 @@ func SlowStartBatchCreate(totalCount int32, errCh chan error, batchCreateFn func
 			}(i)
 		}
 		waitGroup.Wait()
-		skippedPods := totalCount - batchSize
+		skippedPods := totalCount - (pos + batchSize)
 		if errorCount < len(errCh) && skippedPods > 0 {
 			return skippedPods, fmt.Errorf("Slow-start failure")
 		}
