@@ -760,7 +760,7 @@ func (jm *JobController) manageJob(activePods []*v1.Pod, succeeded int32, job *b
 		// prevented from spamming the API service with the pod create requests
 		// after one of its pods fails.  Conveniently, this also prevents the
 		// event spam that those failures would generate.
-		skippedPods, err := controller.SlowStartBatchCreate(diff, errCh, func(_ int32) {
+		skippedPods, err := controller.SlowStartBatch(diff, errCh, func(_ int32) error {
 			err := jm.podControl.CreatePodsWithControllerRef(job.Namespace, &job.Spec.Template, job, metav1.NewControllerRef(job, controllerKind))
 			if err != nil && errors.IsTimeout(err) {
 				// Pod is created but its initialization has timed out.
@@ -770,7 +770,6 @@ func (jm *JobController) manageJob(activePods []*v1.Pod, succeeded int32, job *b
 				// uninitialized for a long time, the informer will not
 				// receive any update, and the controller will create a new
 				// pod when the expectation expires.
-				return
 			}
 			if err != nil {
 				defer utilruntime.HandleError(err)
@@ -780,8 +779,10 @@ func (jm *JobController) manageJob(activePods []*v1.Pod, succeeded int32, job *b
 				activeLock.Lock()
 				active--
 				activeLock.Unlock()
-				errCh <- err
+				return err
 			}
+
+			return nil
 		})
 
 		if err != nil {

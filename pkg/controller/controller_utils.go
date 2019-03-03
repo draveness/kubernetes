@@ -842,21 +842,25 @@ func PodKey(pod *v1.Pod) string {
 	return fmt.Sprintf("%v/%v", pod.Namespace, pod.Name)
 }
 
-// SlowStartBatchCreate
-func SlowStartBatchCreate(totalCount int32, errCh chan error, batchCreateFn func(ix int32)) (int32, error) {
-	waitGroup := sync.WaitGroup{}
-	batchSize := integer.Int32Min(totalCount, SlowStartInitialBatchSize)
-	for pos := int32(0); totalCount > pos; batchSize, pos = integer.Int32Min(2*batchSize, totalCount-(pos+batchSize)), pos+batchSize {
+// SlowStartBatch
+func SlowStartBatch(count int32, errCh chan error, fn func(ix int32) error) (int32, error) {
+	batchSize := integer.Int32Min(count, SlowStartInitialBatchSize)
+	for pos := int32(0); count > pos; batchSize, pos = integer.Int32Min(2*batchSize, count-(pos+batchSize)), pos+batchSize {
 		errorCount := len(errCh)
+		waitGroup := sync.WaitGroup{}
 		waitGroup.Add(int(batchSize))
 		for i := int32(pos); i < pos+batchSize; i++ {
 			go func(ix int32) {
 				defer waitGroup.Done()
-				batchCreateFn(ix)
+				err := fn(ix)
+
+				if err != nil {
+					errCh <- err
+				}
 			}(i)
 		}
 		waitGroup.Wait()
-		skippedPods := totalCount - (pos + batchSize)
+		skippedPods := count - (pos + batchSize)
 		if errorCount < len(errCh) && skippedPods > 0 {
 			return skippedPods, fmt.Errorf("Slow-start failure")
 		}

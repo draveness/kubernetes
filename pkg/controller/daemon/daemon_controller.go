@@ -1022,7 +1022,7 @@ func (dsc *DaemonSetsController) syncNodes(ds *apps.DaemonSet, podsToDelete, nod
 	// prevented from spamming the API service with the pod create requests
 	// after one of its pods fails.  Conveniently, this also prevents the
 	// event spam that those failures would generate.
-	skippedPods, err := controller.SlowStartBatchCreate(int32(createDiff), errCh, func(ix int32) {
+	skippedPods, err := controller.SlowStartBatch(int32(createDiff), errCh, func(ix int32) error {
 		var err error
 
 		podTemplate := template.DeepCopy()
@@ -1051,14 +1051,15 @@ func (dsc *DaemonSetsController) syncNodes(ds *apps.DaemonSet, podsToDelete, nod
 			// uninitialized for a long time, the informer will not
 			// receive any update, and the controller will create a new
 			// pod when the expectation expires.
-			return
 		}
 		if err != nil {
 			klog.V(2).Infof("Failed creation, decrementing expectations for set %q/%q", ds.Namespace, ds.Name)
 			dsc.expectations.CreationObserved(dsKey)
-			errCh <- err
 			utilruntime.HandleError(err)
+			return err
 		}
+
+		return nil
 	})
 
 	if err != nil {
