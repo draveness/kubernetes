@@ -23,102 +23,9 @@ import (
 
 	"github.com/onsi/ginkgo"
 
-	"k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/apimachinery/pkg/util/wait"
 	clientset "k8s.io/client-go/kubernetes"
-	scaleclient "k8s.io/client-go/scale"
-	api "k8s.io/kubernetes/pkg/apis/core"
 	testutils "k8s.io/kubernetes/test/utils"
 )
-
-// RcByNamePort returns a ReplicationController with specified name and port
-func RcByNamePort(name string, replicas int32, image string, port int, protocol v1.Protocol,
-	labels map[string]string, gracePeriod *int64) *v1.ReplicationController {
-
-	return RcByNameContainer(name, replicas, image, labels, v1.Container{
-		Name:  name,
-		Image: image,
-		Ports: []v1.ContainerPort{{ContainerPort: int32(port), Protocol: protocol}},
-	}, gracePeriod)
-}
-
-// RcByNameContainer returns a ReplicationController with specified name and container
-func RcByNameContainer(name string, replicas int32, image string, labels map[string]string, c v1.Container,
-	gracePeriod *int64) *v1.ReplicationController {
-
-	zeroGracePeriod := int64(0)
-
-	// Add "name": name to the labels, overwriting if it exists.
-	labels["name"] = name
-	if gracePeriod == nil {
-		gracePeriod = &zeroGracePeriod
-	}
-	return &v1.ReplicationController{
-		TypeMeta: metav1.TypeMeta{
-			Kind:       "ReplicationController",
-			APIVersion: "v1",
-		},
-		ObjectMeta: metav1.ObjectMeta{
-			Name: name,
-		},
-		Spec: v1.ReplicationControllerSpec{
-			Replicas: func(i int32) *int32 { return &i }(replicas),
-			Selector: map[string]string{
-				"name": name,
-			},
-			Template: &v1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: labels,
-				},
-				Spec: v1.PodSpec{
-					Containers:                    []v1.Container{c},
-					TerminationGracePeriodSeconds: gracePeriod,
-				},
-			},
-		},
-	}
-}
-
-type updateRcFunc func(d *v1.ReplicationController)
-
-// UpdateReplicationControllerWithRetries retries updating the given rc on conflict with the following steps:
-// 1. Get latest resource
-// 2. applyUpdate
-// 3. Update the resource
-func UpdateReplicationControllerWithRetries(c clientset.Interface, namespace, name string, applyUpdate updateRcFunc) (*v1.ReplicationController, error) {
-	var rc *v1.ReplicationController
-	var updateErr error
-	pollErr := wait.PollImmediate(10*time.Millisecond, 1*time.Minute, func() (bool, error) {
-		var err error
-		if rc, err = c.CoreV1().ReplicationControllers(namespace).Get(name, metav1.GetOptions{}); err != nil {
-			return false, err
-		}
-		// Apply the update, then attempt to push it to the apiserver.
-		applyUpdate(rc)
-		if rc, err = c.CoreV1().ReplicationControllers(namespace).Update(rc); err == nil {
-			Logf("Updating replication controller %q", name)
-			return true, nil
-		}
-		updateErr = err
-		return false, nil
-	})
-	if pollErr == wait.ErrWaitTimeout {
-		pollErr = fmt.Errorf("couldn't apply the provided updated to rc %q: %v", name, updateErr)
-	}
-	return rc, pollErr
-}
-
-// DeleteRCAndWaitForGC deletes only the Replication Controller and waits for GC to delete the pods.
-func DeleteRCAndWaitForGC(c clientset.Interface, ns, name string) error {
-	return DeleteResourceAndWaitForGC(c, api.Kind("ReplicationController"), ns, name)
-}
-
-// ScaleRC scales Replication Controller to be desired size.
-func ScaleRC(clientset clientset.Interface, scalesGetter scaleclient.ScalesGetter, ns, name string, size uint, wait bool) error {
-	return ScaleResource(clientset, scalesGetter, ns, name, size, wait, api.Kind("ReplicationController"), api.Resource("replicationcontrollers"))
-}
 
 // RunRC Launches (and verifies correctness) of a Replication Controller
 // and will wait for all pods it spawns to become "Running".
@@ -127,58 +34,6 @@ func RunRC(config testutils.RCConfig) error {
 	config.NodeDumpFunc = DumpNodeDebugInfo
 	config.ContainerDumpFunc = LogFailedContainers
 	return testutils.RunRC(config)
-}
-
-// WaitForRCPodToDisappear returns nil if the pod from the given replication controller (described by rcName) no longer exists.
-// In case of failure or too long waiting time, an error is returned.
-func WaitForRCPodToDisappear(c clientset.Interface, ns, rcName, podName string) error {
-	label := labels.SelectorFromSet(labels.Set(map[string]string{"name": rcName}))
-	// NodeController evicts pod after 5 minutes, so we need timeout greater than that to observe effects.
-	// The grace period must be set to 0 on the pod for it to be deleted during the partition.
-	// Otherwise, it goes to the 'Terminating' state till the kubelet confirms deletion.
-	return WaitForPodToDisappear(c, ns, podName, label, 20*time.Second, 10*time.Minute)
-}
-
-// WaitForReplicationController waits until the RC appears (exist == true), or disappears (exist == false)
-func WaitForReplicationController(c clientset.Interface, namespace, name string, exist bool, interval, timeout time.Duration) error {
-	err := wait.PollImmediate(interval, timeout, func() (bool, error) {
-		_, err := c.CoreV1().ReplicationControllers(namespace).Get(name, metav1.GetOptions{})
-		if err != nil {
-			Logf("Get ReplicationController %s in namespace %s failed (%v).", name, namespace, err)
-			return !exist, nil
-		}
-		Logf("ReplicationController %s in namespace %s found.", name, namespace)
-		return exist, nil
-	})
-	if err != nil {
-		stateMsg := map[bool]string{true: "to appear", false: "to disappear"}
-		return fmt.Errorf("error waiting for ReplicationController %s/%s %s: %v", namespace, name, stateMsg[exist], err)
-	}
-	return nil
-}
-
-// WaitForReplicationControllerwithSelector waits until any RC with given selector appears (exist == true), or disappears (exist == false)
-func WaitForReplicationControllerwithSelector(c clientset.Interface, namespace string, selector labels.Selector, exist bool, interval,
-	timeout time.Duration) error {
-	err := wait.PollImmediate(interval, timeout, func() (bool, error) {
-		rcs, err := c.CoreV1().ReplicationControllers(namespace).List(metav1.ListOptions{LabelSelector: selector.String()})
-		switch {
-		case len(rcs.Items) != 0:
-			Logf("ReplicationController with %s in namespace %s found.", selector.String(), namespace)
-			return exist, nil
-		case len(rcs.Items) == 0:
-			Logf("ReplicationController with %s in namespace %s disappeared.", selector.String(), namespace)
-			return !exist, nil
-		default:
-			Logf("List ReplicationController with %s in namespace %s failed: %v", selector.String(), namespace, err)
-			return false, nil
-		}
-	})
-	if err != nil {
-		stateMsg := map[bool]string{true: "to appear", false: "to disappear"}
-		return fmt.Errorf("error waiting for ReplicationControllers with %s in namespace %s %s: %v", selector.String(), namespace, stateMsg[exist], err)
-	}
-	return nil
 }
 
 // trimDockerRegistry is the function for trimming the docker.io/library from the beginning of the imagename.
