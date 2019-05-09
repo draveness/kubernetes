@@ -42,12 +42,12 @@ func WaitForEndpoint(c clientset.Interface, ns, name string) error {
 	for t := time.Now(); time.Since(t) < registerTimeout; time.Sleep(framework.Poll) {
 		endpoint, err := c.CoreV1().Endpoints(ns).Get(name, metav1.GetOptions{})
 		if apierrs.IsNotFound(err) {
-			framework.Logf("Endpoint %s/%s is not ready yet", ns, name)
+			e2elog.Logf("Endpoint %s/%s is not ready yet", ns, name)
 			continue
 		}
 		framework.ExpectNoError(err, "Failed to get endpoints for %s/%s", ns, name)
 		if len(endpoint.Subsets) == 0 || len(endpoint.Subsets[0].Addresses) == 0 {
-			framework.Logf("Endpoint %s/%s is not ready yet", ns, name)
+			e2elog.Logf("Endpoint %s/%s is not ready yet", ns, name)
 			continue
 		}
 		return nil

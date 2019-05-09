@@ -60,7 +60,7 @@ func recreateNodes(c clientset.Interface, nodes []v1.Node) error {
 
 		args = append(args, fmt.Sprintf("--instances=%s", strings.Join(nodeNames, ",")))
 		args = append(args, fmt.Sprintf("--zone=%s", zone))
-		framework.Logf("Recreating instance group %s.", instanceGroup)
+		e2elog.Logf("Recreating instance group %s.", instanceGroup)
 		stdout, stderr, err := framework.RunCmd("gcloud", args...)
 		if err != nil {
 			return fmt.Errorf("error restarting nodes: %s\nstdout: %s\nstderr: %s", err, stdout, stderr)
@@ -76,7 +76,7 @@ func waitForNodeBootIdsToChange(c clientset.Interface, nodes []v1.Node, timeout 
 		if err := wait.Poll(30*time.Second, timeout, func() (bool, error) {
 			newNode, err := c.CoreV1().Nodes().Get(node.Name, metav1.GetOptions{})
 			if err != nil {
-				framework.Logf("Could not get node info: %s. Retrying in %v.", err, 30*time.Second)
+				e2elog.Logf("Could not get node info: %s. Retrying in %v.", err, 30*time.Second)
 				return false, nil
 			}
 			return node.Status.NodeInfo.BootID != newNode.Status.NodeInfo.BootID, nil

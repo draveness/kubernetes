@@ -37,7 +37,7 @@ func newProvider() (framework.ProviderInterface, error) {
 	}
 	config, err := os.Open(framework.TestContext.CloudConfig.ConfigFile)
 	if err != nil {
-		framework.Logf("Couldn't open cloud provider configuration %s: %#v",
+		e2elog.Logf("Couldn't open cloud provider configuration %s: %#v",
 			framework.TestContext.CloudConfig.ConfigFile, err)
 	}
 	defer config.Close()
@@ -72,7 +72,7 @@ func (p *Provider) CreatePD(zone string) (string, error) {
 // DeletePD deletes a persistent volume
 func (p *Provider) DeletePD(pdName string) error {
 	if err := p.azureCloud.DeleteVolume(pdName); err != nil {
-		framework.Logf("failed to delete Azure volume %q: %v", pdName, err)
+		e2elog.Logf("failed to delete Azure volume %q: %v", pdName, err)
 		return err
 	}
 	return nil
