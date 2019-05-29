@@ -23,6 +23,7 @@ import (
 	genericapirequest "k8s.io/apiserver/pkg/endpoints/request"
 	"k8s.io/apiserver/pkg/registry/rest"
 	"k8s.io/kubernetes/pkg/apis/apps"
+	"k8s.io/kubernetes/pkg/apis/core"
 	api "k8s.io/kubernetes/pkg/apis/core"
 )
 
@@ -90,6 +91,98 @@ func TestStatefulSetStrategy(t *testing.T) {
 	errs = Strategy.ValidateUpdate(ctx, validPs, ps)
 	if len(errs) == 0 {
 		t.Errorf("expected a validation error since updates are disallowed on statefulsets.")
+	}
+}
+
+func TestStatefulSetStrategyWithEnv(t *testing.T) {
+	ctx := genericapirequest.NewDefaultContext()
+	if !Strategy.NamespaceScoped() {
+		t.Errorf("StatefulSet must be namespace scoped")
+	}
+	if Strategy.AllowCreateOnUpdate() {
+		t.Errorf("StatefulSet should not allow create on update")
+	}
+
+	validSelector := map[string]string{"a": "b"}
+	validPodTemplate := api.PodTemplate{
+		Template: api.PodTemplateSpec{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: validSelector,
+			},
+			Spec: api.PodSpec{
+				RestartPolicy: api.RestartPolicyAlways,
+				DNSPolicy:     api.DNSClusterFirst,
+				Containers: []api.Container{{
+					Name:            "abc",
+					Image:           "image",
+					ImagePullPolicy: "IfNotPresent",
+				}},
+			},
+		},
+	}
+
+	psPodTemplate := validPodTemplate
+	psPodTemplate.Template.Spec.Containers[0].Env = []core.EnvVar{
+		{
+			Name: "KEY2",
+			ValueFrom: &core.EnvVarSource{
+				FieldRef: &core.ObjectFieldSelector{
+					APIVersion: "v1",
+					FieldPath:  "metadata.labels['key']",
+				},
+			},
+		},
+	}
+	ps := &apps.StatefulSet{
+		ObjectMeta: metav1.ObjectMeta{Name: "abc", Namespace: metav1.NamespaceDefault},
+		Spec: apps.StatefulSetSpec{
+			PodManagementPolicy: apps.OrderedReadyPodManagement,
+			UpdateStrategy:      apps.StatefulSetUpdateStrategy{Type: apps.RollingUpdateStatefulSetStrategyType},
+			Selector:            &metav1.LabelSelector{MatchLabels: validSelector},
+			Template:            psPodTemplate.Template,
+		},
+	}
+
+	Strategy.PrepareForCreate(ctx, ps)
+	if ps.Status.Replicas != 0 {
+		t.Error("StatefulSet should not allow setting status.replicas on create")
+	}
+	errs := Strategy.Validate(ctx, ps)
+	if len(errs) != 0 {
+		t.Errorf("unexpected error validating %v", errs)
+	}
+
+	newPsPodTemplate := validPodTemplate
+	newPsPodTemplate.Template.Spec.Containers[0].Env = []core.EnvVar{
+		{
+			Name:  "KEY1",
+			Value: "Value1",
+		},
+		{
+			Name: "KEY2",
+			ValueFrom: &core.EnvVarSource{
+				FieldRef: &core.ObjectFieldSelector{
+					APIVersion: "v1",
+					FieldPath:  "metadata.labels['key']",
+				},
+			},
+		},
+	}
+
+	// Just Spec.Replicas is allowed to change
+	validPs := &apps.StatefulSet{
+		ObjectMeta: metav1.ObjectMeta{Name: ps.Name, Namespace: ps.Namespace, ResourceVersion: "1", Generation: 1},
+		Spec: apps.StatefulSetSpec{
+			PodManagementPolicy: apps.OrderedReadyPodManagement,
+			UpdateStrategy:      apps.StatefulSetUpdateStrategy{Type: apps.RollingUpdateStatefulSetStrategyType},
+			Selector:            ps.Spec.Selector,
+			Template:            validPodTemplate.Template,
+		},
+	}
+	Strategy.PrepareForUpdate(ctx, validPs, ps)
+	errs = Strategy.ValidateUpdate(ctx, validPs, ps)
+	if len(errs) != 0 {
+		t.Errorf("updating spec.Replicas is allowed on a statefulset: %v", errs)
 	}
 }
 
