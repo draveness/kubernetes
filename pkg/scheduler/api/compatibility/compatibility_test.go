@@ -31,10 +31,13 @@ import (
 	restclient "k8s.io/client-go/rest"
 	utiltesting "k8s.io/client-go/util/testing"
 	_ "k8s.io/kubernetes/pkg/apis/core/install"
+	"k8s.io/kubernetes/pkg/scheduler"
 	_ "k8s.io/kubernetes/pkg/scheduler/algorithmprovider/defaults"
 	schedulerapi "k8s.io/kubernetes/pkg/scheduler/api"
 	latestschedulerapi "k8s.io/kubernetes/pkg/scheduler/api/latest"
+	kubeschedulerconfig "k8s.io/kubernetes/pkg/scheduler/apis/config"
 	"k8s.io/kubernetes/pkg/scheduler/factory"
+	schedulerframework "k8s.io/kubernetes/pkg/scheduler/framework/v1alpha1"
 )
 
 func TestCompatibility_v1_Scheduler(t *testing.T) {
@@ -1096,24 +1099,32 @@ func TestCompatibility_v1_Scheduler(t *testing.T) {
 		client := clientset.NewForConfigOrDie(&restclient.Config{Host: server.URL, ContentConfig: restclient.ContentConfig{GroupVersion: &schema.GroupVersion{Group: "", Version: "v1"}}})
 		informerFactory := informers.NewSharedInformerFactory(client, 0)
 
-		if _, err := factory.NewConfigFactory(&factory.ConfigFactoryArgs{
-			SchedulerName:                  "some-scheduler-name",
-			Client:                         client,
-			NodeInformer:                   informerFactory.Core().V1().Nodes(),
-			PodInformer:                    informerFactory.Core().V1().Pods(),
-			PvInformer:                     informerFactory.Core().V1().PersistentVolumes(),
-			PvcInformer:                    informerFactory.Core().V1().PersistentVolumeClaims(),
-			ReplicationControllerInformer:  informerFactory.Core().V1().ReplicationControllers(),
-			ReplicaSetInformer:             informerFactory.Apps().V1().ReplicaSets(),
-			StatefulSetInformer:            informerFactory.Apps().V1().StatefulSets(),
-			ServiceInformer:                informerFactory.Core().V1().Services(),
-			PdbInformer:                    informerFactory.Policy().V1beta1().PodDisruptionBudgets(),
-			StorageClassInformer:           informerFactory.Storage().V1().StorageClasses(),
-			HardPodAffinitySymmetricWeight: v1.DefaultHardPodAffinitySymmetricWeight,
-			DisablePreemption:              false,
-			PercentageOfNodesToScore:       schedulerapi.DefaultPercentageOfNodesToScore,
-		}).CreateFromConfig(policy); err != nil {
-			t.Errorf("%s: Error constructing: %v", v, err)
+		defaultSource := "DefaultProvider"
+		if _, err := scheduler.New(client,
+			informerFactory.Core().V1().Nodes(),
+			informerFactory.Core().V1().Pods(),
+			informerFactory.Core().V1().PersistentVolumes(),
+			informerFactory.Core().V1().PersistentVolumeClaims(),
+			informerFactory.Core().V1().ReplicationControllers(),
+			informerFactory.Apps().V1().ReplicaSets(),
+			informerFactory.Apps().V1().StatefulSets(),
+			informerFactory.Core().V1().Services(),
+			informerFactory.Policy().V1beta1().PodDisruptionBudgets(),
+			informerFactory.Storage().V1().StorageClasses(),
+			informerFactory.Storage().V1beta1().CSINodes(),
+			nil,
+			kubeschedulerconfig.SchedulerAlgorithmSource{
+				Provider: &defaultSource,
+			},
+			nil,
+			schedulerframework.NewRegistry(),
+			nil,
+			[]kubeschedulerconfig.PluginConfig{},
+			scheduler.WithHardPodAffinitySymmetricWeight(v1.DefaultHardPodAffinitySymmetricWeight),
+			scheduler.WithPreemptionDisabled(false),
+			scheduler.WithPercentageOfNodesToScore(schedulerapi.DefaultPercentageOfNodesToScore),
+		); err != nil {
+			t.Errorf("%s: Error new scheduler: %v", v, err)
 			continue
 		}
 	}
