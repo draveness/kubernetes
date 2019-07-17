@@ -17,7 +17,7 @@ limitations under the License.
 package priorities
 
 import (
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/kubernetes/pkg/scheduler/algorithm"
@@ -53,6 +53,7 @@ type priorityMetadata struct {
 	controllerRef           *metav1.OwnerReference
 	podFirstServiceSelector labels.Selector
 	totalNumNodes           int
+	podAffinityPriorityMap  *podAffinityPriorityMap
 }
 
 // PriorityMetadata is a PriorityMetadataProducer.  Node info can be nil.
@@ -70,6 +71,7 @@ func (pmf *PriorityMetadataFactory) PriorityMetadata(pod *v1.Pod, nodeNameToInfo
 		controllerRef:           metav1.GetControllerOf(pod),
 		podFirstServiceSelector: getFirstServiceSelector(pod, pmf.serviceLister),
 		totalNumNodes:           len(nodeNameToInfo),
+		podAffinityPriorityMap:  newPodAffinityPriorityMap(),
 	}
 }
 

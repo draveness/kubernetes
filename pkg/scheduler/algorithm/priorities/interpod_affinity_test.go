@@ -21,7 +21,8 @@ import (
 	"reflect"
 	"testing"
 
-	"k8s.io/api/core/v1"
+	apps "k8s.io/api/apps/v1"
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	schedulerapi "k8s.io/kubernetes/pkg/scheduler/api"
 	schedulernodeinfo "k8s.io/kubernetes/pkg/scheduler/nodeinfo"
@@ -517,7 +518,15 @@ func TestInterPodAffinityPriority(t *testing.T) {
 				podLister:             schedulertesting.FakePodLister(test.pods),
 				hardPodAffinityWeight: v1.DefaultHardPodAffinitySymmetricWeight,
 			}
-			ttp := priorityFunction(interPodAffinity.CalculateInterPodAffinityPriorityMap, interPodAffinity.CalculateInterPodAffinityPriorityReduce, nil)
+
+			metaDataProducer := NewPriorityMetadataFactory(
+				schedulertesting.FakeServiceLister([]*v1.Service{}),
+				schedulertesting.FakeControllerLister([]*v1.ReplicationController{}),
+				schedulertesting.FakeReplicaSetLister([]*apps.ReplicaSet{}),
+				schedulertesting.FakeStatefulSetLister([]*apps.StatefulSet{}))
+			metaData := metaDataProducer(test.pod, nodeNameToInfo)
+
+			ttp := priorityFunction(interPodAffinity.CalculateInterPodAffinityPriorityMap, interPodAffinity.CalculateInterPodAffinityPriorityReduce, metaData)
 			list, err := ttp(test.pod, nodeNameToInfo, test.nodes)
 			if err != nil {
 				t.Errorf("unexpected error: %v", err)
@@ -608,7 +617,14 @@ func TestHardPodAffinitySymmetricWeight(t *testing.T) {
 				podLister:             schedulertesting.FakePodLister(test.pods),
 				hardPodAffinityWeight: test.hardPodAffinityWeight,
 			}
-			ttp := priorityFunction(ipa.CalculateInterPodAffinityPriorityMap, ipa.CalculateInterPodAffinityPriorityReduce, nil)
+			metaDataProducer := NewPriorityMetadataFactory(
+				schedulertesting.FakeServiceLister([]*v1.Service{}),
+				schedulertesting.FakeControllerLister([]*v1.ReplicationController{}),
+				schedulertesting.FakeReplicaSetLister([]*apps.ReplicaSet{}),
+				schedulertesting.FakeStatefulSetLister([]*apps.StatefulSet{}))
+			metaData := metaDataProducer(test.pod, nodeNameToInfo)
+
+			ttp := priorityFunction(ipa.CalculateInterPodAffinityPriorityMap, ipa.CalculateInterPodAffinityPriorityReduce, metaData)
 			list, err := ttp(test.pod, nodeNameToInfo, test.nodes)
 			if err != nil {
 				t.Errorf("unexpected error: %v", err)
