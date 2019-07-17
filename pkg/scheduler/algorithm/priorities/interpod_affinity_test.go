@@ -517,7 +517,8 @@ func TestInterPodAffinityPriority(t *testing.T) {
 				podLister:             schedulertesting.FakePodLister(test.pods),
 				hardPodAffinityWeight: v1.DefaultHardPodAffinitySymmetricWeight,
 			}
-			list, err := interPodAffinity.CalculateInterPodAffinityPriority(test.pod, nodeNameToInfo, test.nodes)
+			ttp := priorityFunction(interPodAffinity.CalculateInterPodAffinityPriorityMap, interPodAffinity.CalculateInterPodAffinityPriorityReduce, nil)
+			list, err := ttp(test.pod, nodeNameToInfo, test.nodes)
 			if err != nil {
 				t.Errorf("unexpected error: %v", err)
 			}
@@ -607,7 +608,8 @@ func TestHardPodAffinitySymmetricWeight(t *testing.T) {
 				podLister:             schedulertesting.FakePodLister(test.pods),
 				hardPodAffinityWeight: test.hardPodAffinityWeight,
 			}
-			list, err := ipa.CalculateInterPodAffinityPriority(test.pod, nodeNameToInfo, test.nodes)
+			ttp := priorityFunction(ipa.CalculateInterPodAffinityPriorityMap, ipa.CalculateInterPodAffinityPriorityReduce, nil)
+			list, err := ttp(test.pod, nodeNameToInfo, test.nodes)
 			if err != nil {
 				t.Errorf("unexpected error: %v", err)
 			}

@@ -18,6 +18,7 @@ package priorities
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"sync/atomic"
 
@@ -47,14 +48,14 @@ func NewInterPodAffinityPriority(
 	info predicates.NodeInfo,
 	nodeLister algorithm.NodeLister,
 	podLister algorithm.PodLister,
-	hardPodAffinityWeight int32) PriorityFunction {
+	hardPodAffinityWeight int32) (PriorityMapFunction, PriorityReduceFunction) {
 	interPodAffinity := &InterPodAffinity{
 		info:                  info,
 		nodeLister:            nodeLister,
 		podLister:             podLister,
 		hardPodAffinityWeight: hardPodAffinityWeight,
 	}
-	return interPodAffinity.CalculateInterPodAffinityPriority
+	return interPodAffinity.CalculateInterPodAffinityPriorityMap, interPodAffinity.CalculateInterPodAffinityPriorityReduce
 }
 
 type podAffinityPriorityMap struct {
@@ -108,21 +109,43 @@ func (p *podAffinityPriorityMap) processTerms(terms []v1.WeightedPodAffinityTerm
 	}
 }
 
-// CalculateInterPodAffinityPriority compute a sum by iterating through the elements of weightedPodAffinityTerm and adding
+// CalculateInterPodAffinityPriorityMap returns error when node not found.
+func (ipa *InterPodAffinity) CalculateInterPodAffinityPriorityMap(pod *v1.Pod, meta interface{}, nodeInfo *schedulernodeinfo.NodeInfo) (schedulerapi.HostPriority, error) {
+	node := nodeInfo.Node()
+	if node == nil {
+		return schedulerapi.HostPriority{}, fmt.Errorf("node not found")
+	}
+
+	return schedulerapi.HostPriority{
+		Host: node.Name,
+	}, nil
+}
+
+// CalculateInterPodAffinityPriorityReduce compute a sum by iterating through the elements of weightedPodAffinityTerm and adding
 // "weight" to the sum if the corresponding PodAffinityTerm is satisfied for
 // that node; the node(s) with the highest sum are the most preferred.
 // Symmetry need to be considered for preferredDuringSchedulingIgnoredDuringExecution from podAffinity & podAntiAffinity,
 // symmetry need to be considered for hard requirements from podAffinity
-func (ipa *InterPodAffinity) CalculateInterPodAffinityPriority(pod *v1.Pod, nodeNameToInfo map[string]*schedulernodeinfo.NodeInfo, nodes []*v1.Node) (schedulerapi.HostPriorityList, error) {
+func (ipa *InterPodAffinity) CalculateInterPodAffinityPriorityReduce(pod *v1.Pod, meta interface{}, nodeNameToInfo map[string]*schedulernodeinfo.NodeInfo, result schedulerapi.HostPriorityList) error {
 	affinity := pod.Spec.Affinity
 	hasAffinityConstraints := affinity != nil && affinity.PodAffinity != nil
 	hasAntiAffinityConstraints := affinity != nil && affinity.PodAntiAffinity != nil
+
+	nodes := []*v1.Node{}
+	for _, nodeInfo := range nodeNameToInfo {
+		node := nodeInfo.Node()
+		if node == nil {
+			continue
+		}
+		nodes = append(nodes, node)
+	}
 
 	// priorityMap stores the mapping from node name to so-far computed score of
 	// the node.
 	pm := newPodAffinityPriorityMap(nodes)
 	allNodeNames := make([]string, 0, len(nodeNameToInfo))
 	lazyInit := hasAffinityConstraints || hasAntiAffinityConstraints
+
 	for name := range nodeNameToInfo {
 		allNodeNames = append(allNodeNames, name)
 		// if pod has affinity defined, or target node has affinityPods
@@ -214,7 +237,7 @@ func (ipa *InterPodAffinity) CalculateInterPodAffinityPriority(pod *v1.Pod, node
 	}
 	workqueue.ParallelizeUntil(context.TODO(), 16, len(allNodeNames), processNode)
 	if pm.firstError != nil {
-		return nil, pm.firstError
+		return pm.firstError
 	}
 
 	for _, node := range nodes {
@@ -230,17 +253,19 @@ func (ipa *InterPodAffinity) CalculateInterPodAffinityPriority(pod *v1.Pod, node
 	}
 
 	// calculate final priority score for each node
-	result := make(schedulerapi.HostPriorityList, 0, len(nodes))
 	maxMinDiff := maxCount - minCount
-	for _, node := range nodes {
+	for i, hostPriority := range result {
 		fScore := float64(0)
-		if maxMinDiff > 0 && pm.counts[node.Name] != nil {
-			fScore = float64(schedulerapi.MaxPriority) * (float64(*pm.counts[node.Name]-minCount) / float64(maxCount-minCount))
+		if maxMinDiff > 0 && pm.counts[hostPriority.Host] != nil {
+			fScore = float64(schedulerapi.MaxPriority) * (float64(*pm.counts[hostPriority.Host]-minCount) / float64(maxCount-minCount))
 		}
-		result = append(result, schedulerapi.HostPriority{Host: node.Name, Score: int(fScore)})
+
+		result[i].Host = hostPriority.Host
+		result[i].Score = int(fScore)
 		if klog.V(10) {
-			klog.Infof("%v -> %v: InterPodAffinityPriority, Score: (%d)", pod.Name, node.Name, int(fScore))
+			klog.Infof("%v -> %v: InterPodAffinityPriority, Score: (%d)", pod.Name, hostPriority.Host, int(fScore))
 		}
+		fmt.Println(result, hostPriority.Host, fScore)
 	}
-	return result, nil
+	return nil
 }
