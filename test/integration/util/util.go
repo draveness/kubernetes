@@ -30,8 +30,9 @@ import (
 
 	// import DefaultProvider
 	_ "k8s.io/kubernetes/pkg/scheduler/algorithmprovider/defaults"
-	schedulerapi "k8s.io/kubernetes/pkg/scheduler/api"
+	schedulerconfig "k8s.io/kubernetes/pkg/scheduler/apis/config"
 	"k8s.io/kubernetes/pkg/scheduler/factory"
+	schedulerframework "k8s.io/kubernetes/pkg/scheduler/framework/v1alpha1"
 	"k8s.io/kubernetes/test/integration/framework"
 )
 
@@ -59,7 +60,7 @@ func StartApiserver() (string, ShutdownFunc) {
 // StartScheduler configures and starts a scheduler given a handle to the clientSet interface
 // and event broadcaster. It returns a handle to the configurator for the running scheduler
 // and the shutdown function to stop it.
-func StartScheduler(clientSet clientset.Interface) (factory.Configurator, ShutdownFunc) {
+func StartScheduler(clientSet clientset.Interface) (*factory.Config, ShutdownFunc) {
 	informerFactory := informers.NewSharedInformerFactory(clientSet, 0)
 	stopCh := make(chan struct{})
 	evtBroadcaster := events.NewBroadcaster(&events.EventSinkImpl{
@@ -67,15 +68,15 @@ func StartScheduler(clientSet clientset.Interface) (factory.Configurator, Shutdo
 
 	evtBroadcaster.StartRecordingToSink(stopCh)
 
-	schedulerConfigurator := createSchedulerConfigurator(clientSet, informerFactory, stopCh)
+	recorder := evtBroadcaster.NewRecorder(
+		legacyscheme.Scheme,
+		v1.DefaultSchedulerName,
+	)
 
-	config, err := schedulerConfigurator.CreateFromConfig(schedulerapi.Policy{})
+	sched, err := createSchedulerFactory(clientSet, informerFactory, recorder, stopCh)
 	if err != nil {
 		klog.Fatalf("Error creating scheduler: %v", err)
 	}
-	config.Recorder = evtBroadcaster.NewRecorder(legacyscheme.Scheme, "scheduler")
-
-	sched := scheduler.NewFromConfig(config)
 	scheduler.AddAllEventHandlers(sched,
 		v1.DefaultSchedulerName,
 		informerFactory.Core().V1().Nodes(),
@@ -95,33 +96,38 @@ func StartScheduler(clientSet clientset.Interface) (factory.Configurator, Shutdo
 		close(stopCh)
 		klog.Infof("destroyed scheduler")
 	}
-	return schedulerConfigurator, shutdownFunc
+	return sched.Config(), shutdownFunc
 }
 
-// createSchedulerConfigurator create a configurator for scheduler with given informer factory and default name.
-func createSchedulerConfigurator(
+// createSchedulerFactory create a factory for scheduler with given informer factory and default name.
+func createSchedulerFactory(
 	clientSet clientset.Interface,
 	informerFactory informers.SharedInformerFactory,
+	recorder events.EventRecorder,
 	stopCh <-chan struct{},
-) factory.Configurator {
+) (*scheduler.Scheduler, error) {
+	defaultProviderName := schedulerconfig.SchedulerDefaultProviderName
 
-	return factory.NewConfigFactory(&factory.ConfigFactoryArgs{
-		SchedulerName:                  v1.DefaultSchedulerName,
-		Client:                         clientSet,
-		NodeInformer:                   informerFactory.Core().V1().Nodes(),
-		PodInformer:                    informerFactory.Core().V1().Pods(),
-		PvInformer:                     informerFactory.Core().V1().PersistentVolumes(),
-		PvcInformer:                    informerFactory.Core().V1().PersistentVolumeClaims(),
-		ReplicationControllerInformer:  informerFactory.Core().V1().ReplicationControllers(),
-		ReplicaSetInformer:             informerFactory.Apps().V1().ReplicaSets(),
-		StatefulSetInformer:            informerFactory.Apps().V1().StatefulSets(),
-		ServiceInformer:                informerFactory.Core().V1().Services(),
-		PdbInformer:                    informerFactory.Policy().V1beta1().PodDisruptionBudgets(),
-		StorageClassInformer:           informerFactory.Storage().V1().StorageClasses(),
-		CSINodeInformer:                informerFactory.Storage().V1beta1().CSINodes(),
-		HardPodAffinitySymmetricWeight: v1.DefaultHardPodAffinitySymmetricWeight,
-		DisablePreemption:              false,
-		PercentageOfNodesToScore:       schedulerapi.DefaultPercentageOfNodesToScore,
-		StopCh:                         stopCh,
-	})
+	return scheduler.New(
+		clientSet,
+		informerFactory.Core().V1().Nodes(),
+		informerFactory.Core().V1().Pods(),
+		informerFactory.Core().V1().PersistentVolumes(),
+		informerFactory.Core().V1().PersistentVolumeClaims(),
+		informerFactory.Core().V1().ReplicationControllers(),
+		informerFactory.Apps().V1().ReplicaSets(),
+		informerFactory.Apps().V1().StatefulSets(),
+		informerFactory.Core().V1().Services(),
+		informerFactory.Policy().V1beta1().PodDisruptionBudgets(),
+		informerFactory.Storage().V1().StorageClasses(),
+		informerFactory.Storage().V1beta1().CSINodes(),
+		recorder,
+		schedulerconfig.SchedulerAlgorithmSource{
+			Provider: &defaultProviderName,
+		},
+		stopCh,
+		schedulerframework.NewRegistry(),
+		nil,
+		[]schedulerconfig.PluginConfig{},
+	)
 }

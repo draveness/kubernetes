@@ -25,7 +25,6 @@ import (
 	storagev1beta1 "k8s.io/api/storage/v1beta1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	featuregatetesting "k8s.io/component-base/featuregate/testing"
 	"k8s.io/csi-translation-lib/plugins"
@@ -359,12 +358,11 @@ func benchmarkScheduling(numNodes, numExistingPods, minPods int,
 	if b.N < minPods {
 		b.N = minPods
 	}
-	schedulerConfigFactory, finalFunc := mustSetupScheduler()
+	schedulerConfig, finalFunc, clientset := mustSetupScheduler()
 	defer finalFunc()
-	c := schedulerConfigFactory.GetClient()
 
 	nodePreparer := framework.NewIntegrationTestNodePreparer(
-		c,
+		clientset,
 		[]testutils.CountToStrategy{{Count: numNodes, Strategy: nodeStrategy}},
 		"scheduler-perf-",
 	)
@@ -375,14 +373,11 @@ func benchmarkScheduling(numNodes, numExistingPods, minPods int,
 
 	config := testutils.NewTestPodCreatorConfig()
 	config.AddStrategy("sched-test", numExistingPods, setupPodStrategy)
-	podCreator := testutils.NewTestPodCreator(c, config)
+	podCreator := testutils.NewTestPodCreator(clientset, config)
 	podCreator.CreatePods()
 
 	for {
-		scheduled, err := schedulerConfigFactory.GetScheduledPodLister().List(labels.Everything())
-		if err != nil {
-			klog.Fatalf("%v", err)
-		}
+		scheduled := schedulerConfig.SchedulingQueue.PendingPods()
 		if len(scheduled) >= numExistingPods {
 			break
 		}
@@ -392,15 +387,11 @@ func benchmarkScheduling(numNodes, numExistingPods, minPods int,
 	b.ResetTimer()
 	config = testutils.NewTestPodCreatorConfig()
 	config.AddStrategy("sched-test", b.N, testPodStrategy)
-	podCreator = testutils.NewTestPodCreator(c, config)
+	podCreator = testutils.NewTestPodCreator(clientset, config)
 	podCreator.CreatePods()
 	for {
-		// This can potentially affect performance of scheduler, since List() is done under mutex.
 		// TODO: Setup watch on apiserver and wait until all pods scheduled.
-		scheduled, err := schedulerConfigFactory.GetScheduledPodLister().List(labels.Everything())
-		if err != nil {
-			klog.Fatalf("%v", err)
-		}
+		scheduled := schedulerConfig.SchedulingQueue.PendingPods()
 		if len(scheduled) >= numExistingPods+b.N {
 			break
 		}
