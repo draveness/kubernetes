@@ -61,15 +61,13 @@ import (
 )
 
 type testContext struct {
-	closeFn                framework.CloseFunc
-	httpServer             *httptest.Server
-	ns                     *v1.Namespace
-	clientSet              *clientset.Clientset
-	informerFactory        informers.SharedInformerFactory
-	schedulerConfigFactory factory.Configurator
-	schedulerConfig        *factory.Config
-	scheduler              *scheduler.Scheduler
-	stopCh                 chan struct{}
+	closeFn         framework.CloseFunc
+	httpServer      *httptest.Server
+	ns              *v1.Namespace
+	clientSet       *clientset.Clientset
+	informerFactory informers.SharedInformerFactory
+	scheduler       *scheduler.Scheduler
+	stopCh          chan struct{}
 }
 
 // createConfiguratorWithPodInformer creates a configurator for scheduler.
@@ -174,38 +172,57 @@ func initTestSchedulerWithOptions(
 	disablePreemption bool,
 	resyncPeriod time.Duration,
 ) *testContext {
-	// 1. Create scheduler
+	stopCh := make(chan struct{})
+
 	context.informerFactory = informers.NewSharedInformerFactory(context.clientSet, resyncPeriod)
 
 	var podInformer coreinformers.PodInformer
-
-	// create independent pod informer if required
+	// create independent pod informer and set setPodInformer if required.
 	if setPodInformer {
 		podInformer = factory.NewPodInformer(context.clientSet, 12*time.Hour)
+		go podInformer.Informer().Run(context.stopCh)
+		controller.WaitForCacheSync("scheduler", context.stopCh, podInformer.Informer().HasSynced)
 	} else {
 		podInformer = context.informerFactory.Core().V1().Pods()
 	}
 
-	context.schedulerConfigFactory = createConfiguratorWithPodInformer(
-		v1.DefaultSchedulerName, context.clientSet, podInformer, context.informerFactory, pluginRegistry, plugins,
-		pluginConfig, context.stopCh)
+	eventBroadcaster := events.NewBroadcaster(&events.EventSinkImpl{
+		Interface: context.clientSet.EventsV1beta1().Events(""),
+	})
+	recorder := eventBroadcaster.NewRecorder(
+		legacyscheme.Scheme,
+		v1.DefaultSchedulerName,
+	)
+	eventBroadcaster.StartRecordingToSink(context.stopCh)
+
+	context.informerFactory.Start(context.stopCh)
+	context.informerFactory.WaitForCacheSync(context.stopCh)
 
 	var err error
-
-	if policy != nil {
-		context.schedulerConfig, err = context.schedulerConfigFactory.CreateFromConfig(*policy)
-	} else {
-		context.schedulerConfig, err = context.schedulerConfigFactory.Create()
-	}
-
+	context.scheduler, err = scheduler.New(
+		context.clientSet,
+		context.informerFactory.Core().V1().Nodes(),
+		podInformer,
+		context.informerFactory.Core().V1().PersistentVolumes(),
+		context.informerFactory.Core().V1().PersistentVolumeClaims(),
+		context.informerFactory.Core().V1().ReplicationControllers(),
+		context.informerFactory.Apps().V1().ReplicaSets(),
+		context.informerFactory.Apps().V1().StatefulSets(),
+		context.informerFactory.Core().V1().Services(),
+		context.informerFactory.Policy().V1beta1().PodDisruptionBudgets(),
+		context.informerFactory.Storage().V1().StorageClasses(),
+		context.informerFactory.Storage().V1beta1().CSINodes(),
+		recorder,
+		schedulerconfig.SchedulerAlgorithmSource{},
+		context.stopCh,
+		schedulerframework.NewRegistry(),
+		nil,
+		[]schedulerconfig.PluginConfig{},
+		scheduler.WithPreemptionDisabled(disablePreemption),
+	)
 	if err != nil {
-		t.Fatalf("Couldn't create scheduler config: %v", err)
+		t.Fatalf("Couldn't create scheduler: %v", err)
 	}
-
-	// set DisablePreemption option
-	context.schedulerConfig.DisablePreemption = disablePreemption
-
-	context.scheduler = scheduler.NewFromConfig(context.schedulerConfig)
 
 	scheduler.AddAllEventHandlers(context.scheduler,
 		v1.DefaultSchedulerName,
@@ -217,25 +234,6 @@ func initTestSchedulerWithOptions(
 		context.informerFactory.Storage().V1().StorageClasses(),
 		context.informerFactory.Storage().V1beta1().CSINodes(),
 	)
-
-	// set setPodInformer if provided.
-	if setPodInformer {
-		go podInformer.Informer().Run(context.schedulerConfig.StopEverything)
-		controller.WaitForCacheSync("scheduler", context.schedulerConfig.StopEverything, podInformer.Informer().HasSynced)
-	}
-
-	eventBroadcaster := events.NewBroadcaster(&events.EventSinkImpl{
-		Interface: context.clientSet.EventsV1beta1().Events(""),
-	})
-	context.schedulerConfig.Recorder = eventBroadcaster.NewRecorder(
-		legacyscheme.Scheme,
-		v1.DefaultSchedulerName,
-	)
-	stopCh := make(chan struct{})
-	eventBroadcaster.StartRecordingToSink(stopCh)
-
-	context.informerFactory.Start(context.schedulerConfig.StopEverything)
-	context.informerFactory.WaitForCacheSync(context.schedulerConfig.StopEverything)
 
 	context.scheduler.Run()
 	return context
@@ -267,9 +265,9 @@ func initDisruptionController(t *testing.T, context *testContext) *disruption.Di
 		mapper,
 		scaleClient)
 
-	informers.Start(context.schedulerConfig.StopEverything)
-	informers.WaitForCacheSync(context.schedulerConfig.StopEverything)
-	go dc.Run(context.schedulerConfig.StopEverything)
+	informers.Start(context.stopCh)
+	informers.WaitForCacheSync(context.stopCh)
+	go dc.Run(context.stopCh)
 	return dc
 }
 
