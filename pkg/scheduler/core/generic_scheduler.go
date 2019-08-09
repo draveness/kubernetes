@@ -802,7 +802,8 @@ func PrioritizeNodes(
 	for i := range nodes {
 		result = append(result, schedulerapi.HostPriority{Host: nodes[i].Name, Score: 0})
 		for j := range priorityConfigs {
-			result[i].Score += results[j][i].Score * priorityConfigs[j].Weight
+			// Expand the range to [0, 100] to be compatible with the range allowed by the framework Score plugins.
+			result[i].Score += results[j][i].Score * priorityConfigs[j].Weight * 10
 		}
 	}
 
