@@ -694,7 +694,7 @@ func PrioritizeNodes(
 	priorityConfigs []priorities.PriorityConfig,
 	nodes []*v1.Node,
 	extenders []algorithm.SchedulerExtender,
-	framework framework.Framework,
+	fwk framework.Framework,
 	pluginContext *framework.PluginContext) (schedulerapi.HostPriorityList, error) {
 	// If no priority configs are provided, then the EqualPriority function is applied
 	// This is required to generate the priority list in the required format
@@ -781,7 +781,7 @@ func PrioritizeNodes(
 	}
 
 	// Run the Score plugins.
-	scoresMap, scoreStatus := framework.RunScorePlugins(pluginContext, pod, nodes)
+	scoresMap, scoreStatus := fwk.RunScorePlugins(pluginContext, pod, nodes)
 	if !scoreStatus.IsSuccess() {
 		return schedulerapi.HostPriorityList{}, scoreStatus.AsError()
 	}
@@ -792,7 +792,7 @@ func PrioritizeNodes(
 	for i := range nodes {
 		result = append(result, schedulerapi.HostPriority{Host: nodes[i].Name, Score: 0})
 		for j := range priorityConfigs {
-			result[i].Score += results[j][i].Score * priorityConfigs[j].Weight
+			result[i].Score += results[j][i].Score * priorityConfigs[j].Weight * (framework.MaxNodeScore / schedulerapi.MaxPriority)
 		}
 
 		for j := range scoresMap {

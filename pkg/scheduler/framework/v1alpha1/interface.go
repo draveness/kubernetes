@@ -24,7 +24,6 @@ import (
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
-	schedulerapi "k8s.io/kubernetes/pkg/scheduler/api"
 	schedulernodeinfo "k8s.io/kubernetes/pkg/scheduler/nodeinfo"
 )
 
@@ -71,7 +70,7 @@ const (
 
 const (
 	// MaxNodeScore is the maximum score a Score plugin is expected to return.
-	MaxNodeScore int = schedulerapi.MaxPriority
+	MaxNodeScore int = 100
 
 	// MinNodeScore is the minimum score a Score plugin is expected to return.
 	MinNodeScore int = 0
