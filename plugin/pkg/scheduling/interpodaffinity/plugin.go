@@ -56,6 +56,19 @@ func (ipa *InterPodAffinity) Name() string {
 	return Name
 }
 
+func (ipa *InterPodAffinity) Filter(pc *framework.PluginContext, pod *v1.Pod, nodeName string) *framework.Status {
+	nodeInfo, ok := ipa.nodeInfoSnapshot.NodeInfoMap[nodeName]
+	if !ok {
+		return framework.NewStatus(framework.Error, "node is empty")
+	}
+
+	node := nodeInfo.Node()
+	if node == nil {
+		return framework.NewStatus(framework.Error, "node not found")
+	}
+
+}
+
 // PostFilter .
 func (ipa *InterPodAffinity) PostFilter(pc *framework.PluginContext, pod *v1.Pod, _ []*v1.Node, _ framework.NodeToStatusMap) *framework.Status {
 	ipa.currentPodAffinityPriorityMap = newPodAffinityPriorityMap()
