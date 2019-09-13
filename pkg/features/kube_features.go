@@ -135,6 +135,7 @@ const (
 
 	// owner: @k82cn
 	// beta: v1.12
+	// GA: v1.17
 	//
 	// Taint nodes based on their condition status for 'NetworkUnavailable',
 	// 'MemoryPressure', 'PIDPressure' and 'DiskPressure'.
@@ -526,7 +527,7 @@ var defaultKubernetesFeatureGates = map[featuregate.Feature]featuregate.FeatureS
 	EphemeralContainers:                 {Default: false, PreRelease: featuregate.Alpha},
 	PodShareProcessNamespace:            {Default: true, PreRelease: featuregate.Beta},
 	PodPriority:                         {Default: true, PreRelease: featuregate.GA, LockToDefault: true}, // remove in 1.18
-	TaintNodesByCondition:               {Default: true, PreRelease: featuregate.Beta},
+	TaintNodesByCondition:               {Default: true, PreRelease: featuregate.GA},
 	QOSReserved:                         {Default: false, PreRelease: featuregate.Alpha},
 	ExpandPersistentVolumes:             {Default: true, PreRelease: featuregate.Beta},
 	ExpandInUsePersistentVolumes:        {Default: true, PreRelease: featuregate.Beta},
