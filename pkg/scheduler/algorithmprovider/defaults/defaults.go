@@ -62,34 +62,30 @@ func defaultPredicates() sets.String {
 // of a feature gate temporarily.
 func ApplyFeatureGates() (restore func()) {
 	snapshot := factory.Copy()
-	if utilfeature.DefaultFeatureGate.Enabled(features.TaintNodesByCondition) {
-		// Remove "CheckNodeCondition", "CheckNodeMemoryPressure", "CheckNodePIDPressure"
-		// and "CheckNodeDiskPressure" predicates
-		factory.RemoveFitPredicate(predicates.CheckNodeConditionPred)
-		factory.RemoveFitPredicate(predicates.CheckNodeMemoryPressurePred)
-		factory.RemoveFitPredicate(predicates.CheckNodeDiskPressurePred)
-		factory.RemoveFitPredicate(predicates.CheckNodePIDPressurePred)
-		// Remove key "CheckNodeCondition", "CheckNodeMemoryPressure", "CheckNodePIDPressure" and "CheckNodeDiskPressure"
-		// from ALL algorithm provider
-		// The key will be removed from all providers which in algorithmProviderMap[]
-		// if you just want remove specific provider, call func RemovePredicateKeyFromAlgoProvider()
-		factory.RemovePredicateKeyFromAlgorithmProviderMap(predicates.CheckNodeConditionPred)
-		factory.RemovePredicateKeyFromAlgorithmProviderMap(predicates.CheckNodeMemoryPressurePred)
-		factory.RemovePredicateKeyFromAlgorithmProviderMap(predicates.CheckNodeDiskPressurePred)
-		factory.RemovePredicateKeyFromAlgorithmProviderMap(predicates.CheckNodePIDPressurePred)
+	// Remove "CheckNodeCondition", "CheckNodeMemoryPressure", "CheckNodePIDPressure"
+	// and "CheckNodeDiskPressure" predicates
+	factory.RemoveFitPredicate(predicates.CheckNodeConditionPred)
+	factory.RemoveFitPredicate(predicates.CheckNodeMemoryPressurePred)
+	factory.RemoveFitPredicate(predicates.CheckNodeDiskPressurePred)
+	factory.RemoveFitPredicate(predicates.CheckNodePIDPressurePred)
+	// Remove key "CheckNodeCondition", "CheckNodeMemoryPressure", "CheckNodePIDPressure" and "CheckNodeDiskPressure"
+	// from ALL algorithm provider
+	// The key will be removed from all providers which in algorithmProviderMap[]
+	// if you just want remove specific provider, call func RemovePredicateKeyFromAlgoProvider()
+	factory.RemovePredicateKeyFromAlgorithmProviderMap(predicates.CheckNodeConditionPred)
+	factory.RemovePredicateKeyFromAlgorithmProviderMap(predicates.CheckNodeMemoryPressurePred)
+	factory.RemovePredicateKeyFromAlgorithmProviderMap(predicates.CheckNodeDiskPressurePred)
+	factory.RemovePredicateKeyFromAlgorithmProviderMap(predicates.CheckNodePIDPressurePred)
 
-		// Fit is determined based on whether a pod can tolerate all of the node's taints
-		factory.RegisterMandatoryFitPredicate(predicates.PodToleratesNodeTaintsPred, predicates.PodToleratesNodeTaints)
-		// Fit is determined based on whether a pod can tolerate unschedulable of node
-		factory.RegisterMandatoryFitPredicate(predicates.CheckNodeUnschedulablePred, predicates.CheckNodeUnschedulablePredicate)
-		// Insert Key "PodToleratesNodeTaints" and "CheckNodeUnschedulable" To All Algorithm Provider
-		// The key will insert to all providers which in algorithmProviderMap[]
-		// if you just want insert to specific provider, call func InsertPredicateKeyToAlgoProvider()
-		factory.InsertPredicateKeyToAlgorithmProviderMap(predicates.PodToleratesNodeTaintsPred)
-		factory.InsertPredicateKeyToAlgorithmProviderMap(predicates.CheckNodeUnschedulablePred)
-
-		klog.Infof("TaintNodesByCondition is enabled, PodToleratesNodeTaints predicate is mandatory")
-	}
+	// Fit is determined based on whether a pod can tolerate all of the node's taints
+	factory.RegisterMandatoryFitPredicate(predicates.PodToleratesNodeTaintsPred, predicates.PodToleratesNodeTaints)
+	// Fit is determined based on whether a pod can tolerate unschedulable of node
+	factory.RegisterMandatoryFitPredicate(predicates.CheckNodeUnschedulablePred, predicates.CheckNodeUnschedulablePredicate)
+	// Insert Key "PodToleratesNodeTaints" and "CheckNodeUnschedulable" To All Algorithm Provider
+	// The key will insert to all providers which in algorithmProviderMap[]
+	// if you just want insert to specific provider, call func InsertPredicateKeyToAlgoProvider()
+	factory.InsertPredicateKeyToAlgorithmProviderMap(predicates.PodToleratesNodeTaintsPred)
+	factory.InsertPredicateKeyToAlgorithmProviderMap(predicates.CheckNodeUnschedulablePred)
 
 	// Only register EvenPodsSpread predicate & priority if the feature is enabled
 	if utilfeature.DefaultFeatureGate.Enabled(features.EvenPodsSpread) {

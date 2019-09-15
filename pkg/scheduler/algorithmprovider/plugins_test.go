@@ -20,9 +20,6 @@ import (
 	"fmt"
 	"testing"
 
-	utilfeature "k8s.io/apiserver/pkg/util/feature"
-	featuregatetesting "k8s.io/component-base/featuregate/testing"
-	"k8s.io/kubernetes/pkg/features"
 	"k8s.io/kubernetes/pkg/scheduler/factory"
 )
 
@@ -90,9 +87,6 @@ func TestApplyFeatureGates(t *testing.T) {
 			}
 		})
 	}
-
-	// Apply features for algorithm providers.
-	defer featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.TaintNodesByCondition, true)()
 
 	defer ApplyFeatureGates()()
 
