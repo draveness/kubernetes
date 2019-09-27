@@ -25,7 +25,7 @@ import (
 	"k8s.io/klog"
 
 	apps "k8s.io/api/apps/v1"
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -389,11 +389,11 @@ func (dsc *DaemonSetsController) getUnavailableNumbers(ds *apps.DaemonSet, nodeL
 	var numUnavailable, desiredNumberScheduled int
 	for i := range nodeList {
 		node := nodeList[i]
-		wantToRun, _, _, err := dsc.nodeShouldRunDaemonPod(node, ds)
+		shouldSchedule, _, err := dsc.nodeShouldRunDaemonPod(node, ds)
 		if err != nil {
 			return -1, -1, err
 		}
-		if !wantToRun {
+		if !shouldSchedule {
 			continue
 		}
 		desiredNumberScheduled++
