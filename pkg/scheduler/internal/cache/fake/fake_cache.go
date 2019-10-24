@@ -17,6 +17,8 @@ limitations under the License.
 package fake
 
 import (
+	"context"
+
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	internalcache "k8s.io/kubernetes/pkg/scheduler/internal/cache"
@@ -30,6 +32,10 @@ type Cache struct {
 	ForgetFunc       func(*v1.Pod)
 	IsAssumedPodFunc func(*v1.Pod) bool
 	GetPodFunc       func(*v1.Pod) *v1.Pod
+}
+
+// Run is a fake method for testing.
+func (c *Cache) Run(ctx context.Context) {
 }
 
 // AssumePod is a fake method for testing.

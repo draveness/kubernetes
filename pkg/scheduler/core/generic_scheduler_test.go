@@ -34,7 +34,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/informers"
 	clientsetfake "k8s.io/client-go/kubernetes/fake"
 	"k8s.io/kubernetes/pkg/scheduler/algorithm"
@@ -647,7 +646,9 @@ func TestGenericScheduler(t *testing.T) {
 
 			filterPlugin.failedNodeReturnCodeMap = test.filterFailedNodeReturnCodeMap
 
-			cache := internalcache.New(time.Duration(0), wait.NeverStop)
+			ctx := context.Background()
+			cache := internalcache.New(time.Duration(0))
+			go cache.Run(ctx)
 			for _, pod := range test.pods {
 				cache.AddPod(pod)
 			}
@@ -663,9 +664,12 @@ func TestGenericScheduler(t *testing.T) {
 			if test.buildPredMeta {
 				predMetaProducer = algorithmpredicates.GetPredicateMetadata
 			}
+			queue := internalqueue.NewSchedulingQueue(nil)
+			go queue.Run(ctx)
+
 			scheduler := NewGenericScheduler(
 				cache,
-				internalqueue.NewSchedulingQueue(nil, nil),
+				nil,
 				test.predicates,
 				predMetaProducer,
 				test.prioritizers,
@@ -679,7 +683,7 @@ func TestGenericScheduler(t *testing.T) {
 				false,
 				schedulerapi.DefaultPercentageOfNodesToScore,
 				false)
-			result, err := scheduler.Schedule(context.Background(), framework.NewCycleState(), test.pod)
+			result, err := scheduler.Schedule(ctx, framework.NewCycleState(), test.pod)
 			if !reflect.DeepEqual(err, test.wErr) {
 				t.Errorf("Unexpected error: %v, expected: %v", err.Error(), test.wErr)
 			}
@@ -697,15 +701,22 @@ func TestGenericScheduler(t *testing.T) {
 
 // makeScheduler makes a simple genericScheduler for testing.
 func makeScheduler(predicates map[string]algorithmpredicates.FitPredicate, nodes []*v1.Node) *genericScheduler {
-	cache := internalcache.New(time.Duration(0), wait.NeverStop)
+	cache := internalcache.New(time.Duration(0))
+
+	ctx := context.Background()
+	go cache.Run(ctx)
+
 	for _, n := range nodes {
 		cache.AddNode(n)
 	}
 	prioritizers := []priorities.PriorityConfig{{Map: EqualPriorityMap, Weight: 1}}
 
+	queue := internalqueue.NewSchedulingQueue(nil)
+	go queue.Run(ctx)
+
 	s := NewGenericScheduler(
 		cache,
-		internalqueue.NewSchedulingQueue(nil, nil),
+		queue,
 		predicates,
 		algorithmpredicates.EmptyPredicateMetadataProducer,
 		prioritizers,
@@ -816,12 +827,16 @@ func TestFindFitPredicateCallCounts(t *testing.T) {
 		predicates := map[string]algorithmpredicates.FitPredicate{"true": pc.truePredicate()}
 		nodes := makeNodeList([]string{"1"})
 
-		cache := internalcache.New(time.Duration(0), wait.NeverStop)
+		ctx := context.Background()
+
+		cache := internalcache.New(time.Duration(0))
+		go cache.Run(ctx)
 		for _, n := range nodes {
 			cache.AddNode(n)
 		}
 		prioritizers := []priorities.PriorityConfig{{Map: EqualPriorityMap, Weight: 1}}
-		queue := internalqueue.NewSchedulingQueue(nil, nil)
+		queue := internalqueue.NewSchedulingQueue(nil)
+		go queue.Run(ctx)
 		scheduler := NewGenericScheduler(
 			cache,
 			queue,
@@ -1373,11 +1388,14 @@ func TestSelectNodesForPreemption(t *testing.T) {
 	labelKeys := []string{"hostname", "zone", "region"}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			ctx := context.Background()
+
 			client := clientsetfake.NewSimpleClientset()
 			informerFactory := informers.NewSharedInformerFactory(client, 0)
 
 			filterFailedNodeReturnCodeMap := map[string]framework.Code{}
-			cache := internalcache.New(time.Duration(0), wait.NeverStop)
+			cache := internalcache.New(time.Duration(0))
+			go cache.Run(ctx)
 			for _, pod := range test.pods {
 				cache.AddPod(pod)
 			}
@@ -1387,9 +1405,12 @@ func TestSelectNodesForPreemption(t *testing.T) {
 			}
 
 			filterPlugin.failedNodeReturnCodeMap = filterFailedNodeReturnCodeMap
+			queue := internalqueue.NewSchedulingQueue(nil)
+			go queue.Run(ctx)
+
 			scheduler := NewGenericScheduler(
 				nil,
-				internalqueue.NewSchedulingQueue(nil, nil),
+				queue,
 				test.predicates,
 				algorithmpredicates.GetPredicateMetadata,
 				nil,
@@ -2090,8 +2111,9 @@ func TestPreempt(t *testing.T) {
 			informerFactory := informers.NewSharedInformerFactory(client, 0)
 
 			t.Logf("===== Running test %v", t.Name())
-			stop := make(chan struct{})
-			cache := internalcache.New(time.Duration(0), stop)
+			ctx, cancel := context.WithCancel(context.Background())
+			cache := internalcache.New(time.Duration(0))
+			go cache.Run(ctx)
 			for _, pod := range test.pods {
 				cache.AddPod(pod)
 			}
@@ -2131,9 +2153,12 @@ func TestPreempt(t *testing.T) {
 			if test.buildPredMeta {
 				predMetaProducer = algorithmpredicates.GetPredicateMetadata
 			}
+			queue := internalqueue.NewSchedulingQueue(nil)
+			go queue.Run(ctx)
+
 			scheduler := NewGenericScheduler(
 				cache,
-				internalqueue.NewSchedulingQueue(nil, nil),
+				queue,
 				map[string]algorithmpredicates.FitPredicate{"matches": predicate},
 				predMetaProducer,
 				[]priorities.PriorityConfig{{Function: numericPriority, Weight: 1}},
@@ -2154,7 +2179,7 @@ func TestPreempt(t *testing.T) {
 			if test.failedPredMap != nil {
 				failedPredMap = test.failedPredMap
 			}
-			node, victims, _, err := scheduler.Preempt(context.Background(), state, test.pod, error(&FitError{Pod: test.pod, FailedPredicates: failedPredMap}))
+			node, victims, _, err := scheduler.Preempt(ctx, state, test.pod, error(&FitError{Pod: test.pod, FailedPredicates: failedPredMap}))
 			if err != nil {
 				t.Errorf("unexpected error in preemption: %v", err)
 			}
@@ -2184,14 +2209,14 @@ func TestPreempt(t *testing.T) {
 				test.pod.Status.NominatedNodeName = node.Name
 			}
 			// Call preempt again and make sure it doesn't preempt any more pods.
-			node, victims, _, err = scheduler.Preempt(context.Background(), state, test.pod, error(&FitError{Pod: test.pod, FailedPredicates: failedPredMap}))
+			node, victims, _, err = scheduler.Preempt(ctx, state, test.pod, error(&FitError{Pod: test.pod, FailedPredicates: failedPredMap}))
 			if err != nil {
 				t.Errorf("unexpected error in preemption: %v", err)
 			}
 			if node != nil && len(victims) > 0 {
 				t.Errorf("didn't expect any more preemption. Node %v is selected for preemption.", node)
 			}
-			close(stop)
+			cancel()
 		})
 	}
 }

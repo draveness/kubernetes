@@ -24,6 +24,7 @@ limitations under the License.
 package queue
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 	"sync"
@@ -68,6 +69,8 @@ const (
 // The interface follows a pattern similar to cache.FIFO and cache.Heap and
 // makes it easy to use those data structures as a SchedulingQueue.
 type SchedulingQueue interface {
+	Run(ctx context.Context)
+
 	Add(pod *v1.Pod) error
 	// AddUnschedulableIfNotPresent adds an unschedulable pod back to scheduling queue.
 	// The podSchedulingCycle represents the current scheduling cycle number which can be
@@ -100,8 +103,8 @@ type SchedulingQueue interface {
 }
 
 // NewSchedulingQueue initializes a priority queue as a new scheduling queue.
-func NewSchedulingQueue(stop <-chan struct{}, fwk framework.Framework, opts ...Option) SchedulingQueue {
-	return NewPriorityQueue(stop, fwk, opts...)
+func NewSchedulingQueue(fwk framework.Framework, opts ...Option) SchedulingQueue {
+	return NewPriorityQueue(fwk, opts...)
 }
 
 // NominatedNodeName returns nominated node name of a Pod.
@@ -117,7 +120,6 @@ func NominatedNodeName(pod *v1.Pod) string {
 // is called unschedulableQ. The third queue holds pods that are moved from
 // unschedulable queues and will be moved to active queue when backoff are completed.
 type PriorityQueue struct {
-	stop  <-chan struct{}
 	clock util.Clock
 	// podBackoff tracks backoff for pods attempting to be rescheduled
 	podBackoff *PodBackoffMap
@@ -209,7 +211,6 @@ func activeQComp(podInfo1, podInfo2 interface{}) bool {
 
 // NewPriorityQueue creates a PriorityQueue object.
 func NewPriorityQueue(
-	stop <-chan struct{},
 	fwk framework.Framework,
 	opts ...Option,
 ) *PriorityQueue {
@@ -232,7 +233,6 @@ func NewPriorityQueue(
 
 	pq := &PriorityQueue{
 		clock:            options.clock,
-		stop:             stop,
 		podBackoff:       NewPodBackoffMap(options.podInitialBackoffDuration, options.podMaxBackoffDuration),
 		activeQ:          heap.NewWithRecorder(podInfoKeyFunc, comp, metrics.NewActivePodsRecorder()),
 		unschedulableQ:   newUnschedulablePodsMap(metrics.NewUnschedulablePodsRecorder()),
@@ -242,15 +242,18 @@ func NewPriorityQueue(
 	pq.cond.L = &pq.lock
 	pq.podBackoffQ = heap.NewWithRecorder(podInfoKeyFunc, pq.podsCompareBackoffCompleted, metrics.NewBackoffPodsRecorder())
 
-	pq.run()
-
 	return pq
 }
 
-// run starts the goroutine to pump from podBackoffQ to activeQ
-func (p *PriorityQueue) run() {
-	go wait.Until(p.flushBackoffQCompleted, 1.0*time.Second, p.stop)
-	go wait.Until(p.flushUnschedulableQLeftover, 30*time.Second, p.stop)
+// Run starts the goroutine to pump from podBackoffQ to activeQ
+func (p *PriorityQueue) Run(ctx context.Context) {
+	go wait.UntilWithContext(ctx, p.flushBackoffQCompleted, 1.0*time.Second)
+	go wait.UntilWithContext(ctx, p.flushUnschedulableQLeftover, 30*time.Second)
+
+	select {
+	case <-ctx.Done():
+		p.Close()
+	}
 }
 
 // Add adds a pod to the active queue. It should be called only when a new pod
@@ -362,7 +365,7 @@ func (p *PriorityQueue) AddUnschedulableIfNotPresent(pInfo *framework.PodInfo, p
 }
 
 // flushBackoffQCompleted Moves all pods from backoffQ which have completed backoff in to activeQ
-func (p *PriorityQueue) flushBackoffQCompleted() {
+func (p *PriorityQueue) flushBackoffQCompleted(ctx context.Context) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	for {
@@ -397,7 +400,7 @@ func (p *PriorityQueue) flushBackoffQCompleted() {
 
 // flushUnschedulableQLeftover moves pod which stays in unschedulableQ longer than the durationStayUnschedulableQ
 // to activeQ.
-func (p *PriorityQueue) flushUnschedulableQLeftover() {
+func (p *PriorityQueue) flushUnschedulableQLeftover(ctx context.Context) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 

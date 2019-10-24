@@ -103,9 +103,6 @@ type Scheduler struct {
 	// Recorder is the EventRecorder to use
 	Recorder events.EventRecorder
 
-	// Close this to shut down the scheduler.
-	StopEverything <-chan struct{}
-
 	// VolumeBinder handles PVC/PV binding for the pod.
 	VolumeBinder *volumebinder.VolumeBinder
 
@@ -252,7 +249,6 @@ func New(client clientset.Interface,
 	podInformer coreinformers.PodInformer,
 	recorder events.EventRecorder,
 	schedulerAlgorithmSource kubeschedulerconfig.SchedulerAlgorithmSource,
-	stopCh <-chan struct{},
 	opts ...Option) (*Scheduler, error) {
 
 	options := defaultSchedulerOptions
@@ -260,7 +256,7 @@ func New(client clientset.Interface,
 		opt(&options)
 	}
 
-	schedulerCache := internalcache.New(30*time.Second, stopCh)
+	schedulerCache := internalcache.New(30 * time.Second)
 	volumeBinder := volumebinder.NewVolumeBinder(
 		client,
 		informerFactory.Core().V1().Nodes(),
@@ -341,7 +337,6 @@ func New(client clientset.Interface,
 	// Additional tweaks to the config produced by the configurator.
 	config.Recorder = recorder
 	config.DisablePreemption = options.disablePreemption
-	config.StopEverything = stopCh
 
 	// Create the scheduler.
 	sched := NewFromConfig(config)
@@ -400,7 +395,6 @@ func NewFromConfig(config *Config) *Scheduler {
 		NextPod:           config.NextPod,
 		Error:             config.Error,
 		Recorder:          config.Recorder,
-		StopEverything:    config.StopEverything,
 		VolumeBinder:      config.VolumeBinder,
 		DisablePreemption: config.DisablePreemption,
 		SchedulingQueue:   config.SchedulingQueue,
@@ -409,6 +403,8 @@ func NewFromConfig(config *Config) *Scheduler {
 
 // Run begins watching and scheduling. It waits for cache to be synced, then starts scheduling and blocked until the context is done.
 func (sched *Scheduler) Run(ctx context.Context) {
+	go sched.SchedulerCache.Run(ctx)
+
 	if !cache.WaitForCacheSync(ctx.Done(), sched.scheduledPodsHasSynced) {
 		return
 	}

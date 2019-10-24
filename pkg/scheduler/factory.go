@@ -27,7 +27,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/apimachinery/pkg/util/wait"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	"k8s.io/client-go/informers"
 	appsinformers "k8s.io/client-go/informers/apps/v1"
@@ -92,9 +91,6 @@ type Config struct {
 
 	// Recorder is the EventRecorder to use
 	Recorder events.EventRecorder
-
-	// Close this to shut down the scheduler.
-	StopEverything <-chan struct{}
 
 	// VolumeBinder handles PVC/PV binding for the pod.
 	VolumeBinder *volumebinder.VolumeBinder
@@ -200,7 +196,6 @@ type ConfigFactoryArgs struct {
 	BindTimeoutSeconds             int64
 	PodInitialBackoffSeconds       int64
 	PodMaxBackoffSeconds           int64
-	StopCh                         <-chan struct{}
 	Registry                       framework.Registry
 	Plugins                        *config.Plugins
 	PluginConfig                   []config.PluginConfig
@@ -210,11 +205,6 @@ type ConfigFactoryArgs struct {
 // NewConfigFactory initializes the default implementation of a Configurator. To encourage eventual privatization of the struct type, we only
 // return the interface.
 func NewConfigFactory(args *ConfigFactoryArgs) *Configurator {
-	stopEverything := args.StopCh
-	if stopEverything == nil {
-		stopEverything = wait.NeverStop
-	}
-
 	// storageClassInformer is only enabled through VolumeScheduling feature gate
 	var storageClassLister storagelistersv1.StorageClassLister
 	if args.StorageClassInformer != nil {
@@ -242,7 +232,6 @@ func NewConfigFactory(args *ConfigFactoryArgs) *Configurator {
 		csiNodeLister:                  csiNodeLister,
 		volumeBinder:                   args.VolumeBinder,
 		schedulerCache:                 args.SchedulerCache,
-		StopEverything:                 stopEverything,
 		hardPodAffinitySymmetricWeight: args.HardPodAffinitySymmetricWeight,
 		disablePreemption:              args.DisablePreemption,
 		percentageOfNodesToScore:       args.PercentageOfNodesToScore,
@@ -408,7 +397,6 @@ func (c *Configurator) CreateFromKeys(predicateKeys, priorityKeys sets.String, e
 	}
 
 	podQueue := internalqueue.NewSchedulingQueue(
-		c.StopEverything,
 		framework,
 		internalqueue.WithPodInitialBackoffDuration(time.Duration(c.podInitialBackoffSeconds)*time.Second),
 		internalqueue.WithPodMaxBackoffDuration(time.Duration(c.podMaxBackoffSeconds)*time.Second),
@@ -422,11 +410,6 @@ func (c *Configurator) CreateFromKeys(predicateKeys, priorityKeys sets.String, e
 		podQueue,
 	)
 	debugger.ListenForSignal(c.StopEverything)
-
-	go func() {
-		<-c.StopEverything
-		podQueue.Close()
-	}()
 
 	algo := core.NewGenericScheduler(
 		c.schedulerCache,
@@ -453,7 +436,6 @@ func (c *Configurator) CreateFromKeys(predicateKeys, priorityKeys sets.String, e
 		Framework:       framework,
 		NextPod:         internalqueue.MakeNextPodFunc(podQueue),
 		Error:           MakeDefaultErrorFunc(c.client, podQueue, c.schedulerCache),
-		StopEverything:  c.StopEverything,
 		VolumeBinder:    c.volumeBinder,
 		SchedulingQueue: podQueue,
 		Plugins:         plugins,

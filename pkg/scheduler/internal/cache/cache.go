@@ -17,6 +17,7 @@ limitations under the License.
 package cache
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"time"
@@ -40,10 +41,8 @@ var (
 // New returns a Cache implementation.
 // It automatically starts a go routine that manages expiration of assumed pods.
 // "ttl" is how long the assumed pod will get expired.
-// "stop" is the channel that would close the background goroutine.
-func New(ttl time.Duration, stop <-chan struct{}) Cache {
-	cache := newSchedulerCache(ttl, cleanAssumedPeriod, stop)
-	cache.run()
+func New(ttl time.Duration) Cache {
+	cache := newSchedulerCache(ttl, cleanAssumedPeriod)
 	return cache
 }
 
@@ -57,7 +56,6 @@ type nodeInfoListItem struct {
 }
 
 type schedulerCache struct {
-	stop   <-chan struct{}
 	ttl    time.Duration
 	period time.Duration
 
@@ -100,11 +98,10 @@ func (cache *schedulerCache) createImageStateSummary(state *imageState) *schedul
 	}
 }
 
-func newSchedulerCache(ttl, period time.Duration, stop <-chan struct{}) *schedulerCache {
+func newSchedulerCache(ttl, period time.Duration) *schedulerCache {
 	return &schedulerCache{
 		ttl:    ttl,
 		period: period,
-		stop:   stop,
 
 		nodes:       make(map[string]*nodeInfoListItem),
 		nodeTree:    newNodeTree(nil),
@@ -626,11 +623,11 @@ func (cache *schedulerCache) removeNodeImageStates(node *v1.Node) {
 	}
 }
 
-func (cache *schedulerCache) run() {
-	go wait.Until(cache.cleanupExpiredAssumedPods, cache.period, cache.stop)
+func (cache *schedulerCache) Run(ctx context.Context) {
+	wait.UntilWithContext(ctx, cache.cleanupExpiredAssumedPods, cache.period)
 }
 
-func (cache *schedulerCache) cleanupExpiredAssumedPods() {
+func (cache *schedulerCache) cleanupExpiredAssumedPods(ctx context.Context) {
 	cache.cleanupAssumedPods(time.Now())
 }
 
