@@ -84,6 +84,7 @@ import (
 	"k8s.io/kubernetes/pkg/kubelet/metrics/collectors"
 	"k8s.io/kubernetes/pkg/kubelet/network/dns"
 	"k8s.io/kubernetes/pkg/kubelet/nodelease"
+	"k8s.io/kubernetes/pkg/kubelet/nodestatus"
 	oomwatcher "k8s.io/kubernetes/pkg/kubelet/oom"
 	"k8s.io/kubernetes/pkg/kubelet/pleg"
 	"k8s.io/kubernetes/pkg/kubelet/pluginmanager"
@@ -543,6 +544,7 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 		experimentalHostUserNamespaceDefaulting: utilfeature.DefaultFeatureGate.Enabled(features.ExperimentalHostUserNamespaceDefaultingGate),
 		keepTerminatedPodVolumes:                keepTerminatedPodVolumes,
 		nodeStatusMaxImages:                     nodeStatusMaxImages,
+		nodeStatusRegistry:                      nodestatus.NewRegistry(),
 	}
 
 	if klet.cloud != nil {
@@ -1147,6 +1149,9 @@ type Kubelet struct {
 	// clock is an interface that provides time related functionality in a way that makes it
 	// easy to test the code.
 	clock clock.Clock
+
+	// nodeStatusRegistry is the plugin registry for node status updating.
+	nodeStatusRegistry *nodestatus.Registry
 
 	// handlers called during the tryUpdateNodeStatus cycle
 	setNodeStatusFuncs []func(*v1.Node) error
