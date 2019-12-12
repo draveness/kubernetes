@@ -449,9 +449,8 @@ func TestSchedulerNoPhantomPodAfterDelete(t *testing.T) {
 	select {
 	case err := <-errChan:
 		expectErr := &core.FitError{
-			Pod:              secondPod,
-			NumAllNodes:      1,
-			FailedPredicates: core.FailedPredicateMap{},
+			Pod:         secondPod,
+			NumAllNodes: 1,
 			FilteredNodesStatuses: framework.NodeToStatusMap{
 				node.Name: framework.NewStatus(
 					framework.Unschedulable,
@@ -661,7 +660,6 @@ func TestSchedulerFailedSchedulingReasons(t *testing.T) {
 		expectErr := &core.FitError{
 			Pod:                   podWithTooBigResourceRequests,
 			NumAllNodes:           len(nodes),
-			FailedPredicates:      core.FailedPredicateMap{},
 			FilteredNodesStatuses: failedNodeStatues,
 		}
 		if len(fmt.Sprint(expectErr)) > 150 {

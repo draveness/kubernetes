@@ -331,9 +331,8 @@ func TestGenericScheduler(t *testing.T) {
 			pod:   &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "2", UID: types.UID("2")}},
 			name:  "test 1",
 			wErr: &FitError{
-				Pod:              &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "2", UID: types.UID("2")}},
-				NumAllNodes:      2,
-				FailedPredicates: FailedPredicateMap{},
+				Pod:         &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "2", UID: types.UID("2")}},
+				NumAllNodes: 2,
 				FilteredNodesStatuses: framework.NodeToStatusMap{
 					"machine1": framework.NewStatus(framework.Unschedulable, algorithmpredicates.ErrFakePredicate.GetReason()),
 					"machine2": framework.NewStatus(framework.Unschedulable, algorithmpredicates.ErrFakePredicate.GetReason()),
@@ -414,9 +413,8 @@ func TestGenericScheduler(t *testing.T) {
 			pod:          &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "2", UID: types.UID("2")}},
 			name:         "test 7",
 			wErr: &FitError{
-				Pod:              &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "2", UID: types.UID("2")}},
-				NumAllNodes:      3,
-				FailedPredicates: FailedPredicateMap{},
+				Pod:         &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "2", UID: types.UID("2")}},
+				NumAllNodes: 3,
 				FilteredNodesStatuses: framework.NodeToStatusMap{
 					"3": framework.NewStatus(framework.Unschedulable, algorithmpredicates.ErrFakePredicate.GetReason()),
 					"2": framework.NewStatus(framework.Unschedulable, algorithmpredicates.ErrFakePredicate.GetReason()),
@@ -445,9 +443,8 @@ func TestGenericScheduler(t *testing.T) {
 			nodes:        []string{"1", "2"},
 			name:         "test 8",
 			wErr: &FitError{
-				Pod:              &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "2", UID: types.UID("2")}},
-				NumAllNodes:      2,
-				FailedPredicates: FailedPredicateMap{},
+				Pod:         &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "2", UID: types.UID("2")}},
+				NumAllNodes: 2,
 				FilteredNodesStatuses: framework.NodeToStatusMap{
 					"1": framework.NewStatus(framework.Unschedulable, algorithmpredicates.ErrFakePredicate.GetReason()),
 					"2": framework.NewStatus(framework.Unschedulable, algorithmpredicates.ErrFakePredicate.GetReason()),
@@ -649,9 +646,8 @@ func TestGenericScheduler(t *testing.T) {
 			pod:           &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test-filter", UID: types.UID("test-filter")}},
 			expectedHosts: nil,
 			wErr: &FitError{
-				Pod:              &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test-filter", UID: types.UID("test-filter")}},
-				NumAllNodes:      1,
-				FailedPredicates: FailedPredicateMap{},
+				Pod:         &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test-filter", UID: types.UID("test-filter")}},
+				NumAllNodes: 1,
 				FilteredNodesStatuses: framework.NodeToStatusMap{
 					"3": framework.NewStatus(framework.Unschedulable, "injecting failure for pod test-filter"),
 				},
@@ -670,9 +666,8 @@ func TestGenericScheduler(t *testing.T) {
 			pod:           &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test-filter", UID: types.UID("test-filter")}},
 			expectedHosts: nil,
 			wErr: &FitError{
-				Pod:              &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test-filter", UID: types.UID("test-filter")}},
-				NumAllNodes:      1,
-				FailedPredicates: FailedPredicateMap{},
+				Pod:         &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test-filter", UID: types.UID("test-filter")}},
+				NumAllNodes: 1,
 				FilteredNodesStatuses: framework.NodeToStatusMap{
 					"3": framework.NewStatus(framework.UnschedulableAndUnresolvable, "injecting failure for pod test-filter"),
 				},
@@ -798,7 +793,7 @@ func TestFindFitAllError(t *testing.T) {
 		st.RegisterFilterPlugin("MatchFilter", NewMatchFilterPlugin),
 	)
 
-	_, _, nodeToStatusMap, err := scheduler.findNodesThatFit(context.Background(), framework.NewCycleState(), &v1.Pod{})
+	_, nodeToStatusMap, err := scheduler.findNodesThatFit(context.Background(), framework.NewCycleState(), &v1.Pod{})
 
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
@@ -832,7 +827,7 @@ func TestFindFitSomeError(t *testing.T) {
 	)
 
 	pod := &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "1", UID: types.UID("1")}}
-	_, _, nodeToStatusMap, err := scheduler.findNodesThatFit(context.Background(), framework.NewCycleState(), pod)
+	_, nodeToStatusMap, err := scheduler.findNodesThatFit(context.Background(), framework.NewCycleState(), pod)
 
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
@@ -917,7 +912,7 @@ func TestFindFitPredicateCallCounts(t *testing.T) {
 		cache.UpdateNodeInfoSnapshot(scheduler.nodeInfoSnapshot)
 		queue.UpdateNominatedPodForNode(&v1.Pod{ObjectMeta: metav1.ObjectMeta{UID: types.UID("nominated")}, Spec: v1.PodSpec{Priority: &midPriority}}, "1")
 
-		_, _, _, err := scheduler.findNodesThatFit(context.Background(), framework.NewCycleState(), test.pod)
+		_, _, err := scheduler.findNodesThatFit(context.Background(), framework.NewCycleState(), test.pod)
 
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
@@ -951,6 +946,11 @@ func TestHumanReadableFitError(t *testing.T) {
 	err := &FitError{
 		Pod:         &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "2", UID: types.UID("2")}},
 		NumAllNodes: 3,
+		FilteredNodesStatuses: framework.NodeToStatusMap{
+			"1": framework.NewStatus(framework.Error, ""),
+			"2": framework.NewStatus(framework.Error, ""),
+			"3": framework.NewStatus(framework.Error, ""),
+		},
 		FailedPredicates: FailedPredicateMap{
 			"1": []algorithmpredicates.PredicateFailureReason{algorithmpredicates.ErrNodeUnderMemoryPressure},
 			"2": []algorithmpredicates.PredicateFailureReason{algorithmpredicates.ErrNodeUnderDiskPressure},
@@ -2425,7 +2425,7 @@ func TestFairEvaluationForNodes(t *testing.T) {
 
 	// Iterating over all nodes more than twice
 	for i := 0; i < 2*(numAllNodes/nodesToFind+1); i++ {
-		nodesThatFit, _, _, err := g.findNodesThatFit(context.Background(), framework.NewCycleState(), &v1.Pod{})
+		nodesThatFit, _, err := g.findNodesThatFit(context.Background(), framework.NewCycleState(), &v1.Pod{})
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
 		}
